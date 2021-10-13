@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:email="http://www.mulesoft.org/schema/mule/email"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/email http://www.mulesoft.org/schema/mule/email/current/mule-email.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="7d39807b-1339-4cbc-a3a3-18e5cfc5c3ec" >
+		<db:my-sql-connection host="${db.host}" port="${db.port}" user="${db.username}" password="${secure::db.password}" database="${db.database}" />
+	</db:config>
+	<flow name="error-handling-email" doc:id="860873aa-1733-4859-9e11-3ddfccc45f19">
+		<http:listener doc:name="Listener" doc:id="9746695e-c8b0-4686-bbf2-de2d7a40bba1" path="/insert" allowedMethods="POST" config-ref="HTTP_Listener_config"/>
+		<batch:job jobName="Batch_Job" doc:id="254c21fb-454e-47ee-8af2-cacb0adb196d" maxFailedRecords="-1">
+			<batch:process-records >
+				<batch:step name="Batch_Step_1" doc:id="4f168d08-c5b8-4a6e-b005-529d33994c24">
+					<batch:aggregator doc:name="Batch Aggregator" doc:id="fdac030e-9ad0-4961-8730-8dccfcafdc17" size="5">
+						<ee:transform doc:name="Transform Message" doc:id="70140336-c649-4294-b69d-f99800fa5fca">
+							<ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<logger level="INFO" doc:name="" doc:id="dc68eac9-babf-4f01-a3de-647f30ed68bb" message="insert into DB  #[payload]" />
+					</batch:aggregator>
+					<validation:is-true doc:name="Is true" doc:id="4be404be-66b8-47d7-aa96-37c45af7b620" expression="#[(payload['id'] mod 2) ==0 ]" message="Mod 2 Error"/>
+					<db:insert doc:name="Insert" doc:id="5fb96601-b193-4740-97a6-86a97fee7f80" config-ref="Database_Config">
+						<db:sql ><![CDATA[insert into login values (:username, :password);]]></db:sql>
+						<db:input-parameters ><![CDATA[#[{
+	"username": payload.name,
+	"password": payload.name ++ payload.id }]]]></db:input-parameters>
+					</db:insert>
+					<logger level="INFO" doc:name="Logger " doc:id="82b8e5f6-2581-4ebe-afbb-15b0c435d2e6" message="#[payload]"/>
+				</batch:step>
+				<batch:step name="Batch_Step_2" doc:id="8280611a-b96b-4cdf-923b-bc9f8c133fc8" acceptPolicy="ONLY_FAILURES">
+					<logger level="INFO" doc:name="" doc:id="e783a87b-5894-46e3-aa84-81d16c4f74db" message="failed record found #[payload]" />
+					<batch:aggregator doc:name="Batch Aggregator" doc:id="a785404d-f3ca-463f-8b9c-b9e284152b3f" streaming="true">
+						<ee:transform doc:name="Transform Message" doc:id="5b156f02-297a-4523-a1ad-34bf11317a75">
+							<ee:message>
+								<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<logger level="INFO" doc:name="" doc:id="a6420bdf-89c3-43d5-9c02-537e14420e7a" message="sending email for records #[payload]" />
+						<email:send doc:name="Send" doc:id="8c6f6523-4126-4d08-a9cf-9349c0d1b3c7" config-ref="Email_SMTP" fromAddress="shubham.bari@apisero.com" subject="Failed Records">
+							<email:to-addresses >
+								<email:to-address value="shubham.bari@apisero.com" />
+							</email:to-addresses>
+						</email:send>
+					</batch:aggregator>
+				</batch:step>
+			</batch:process-records>
+			<batch:on-complete >
+				<logger level="INFO" doc:name="" doc:id="8cf9f91f-48e4-47d0-a6f3-19b85b367cbe" message='summary report - #[payload write "application/json"]' />
+			</batch:on-complete>
+		</batch:job>
+		<ee:transform doc:name="Transform Message" doc:id="fc8931a6-b81e-4b77-af62-638cd72f676a" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="5bc2b5f0-6b3f-4c4f-9d87-df8a512d1fee" >
+				<logger level="INFO" doc:name="Main Flow Error" doc:id="b23ba194-f366-4eef-92a3-de4426b595a2" message="Error in Main Flow"/>
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="operation-flow" doc:id="5e3622f1-8397-4ac3-aebc-9298c75e7a1f" >
+		<http:listener doc:name="Listener" doc:id="63079d37-7e45-4062-817e-43ef02a97dfc" config-ref="HTTP_Listener_config" path="/add" allowedMethods="POST">
+			<http:error-response >
+				<http:body ><![CDATA[#[payload]]]></http:body>
+			</http:error-response>
+		</http:listener>
+		<choice doc:name="Choice" doc:id="f8bd7a91-d0ed-4318-8e84-72044948aa53" >
+			<when expression="#[isInteger(payload.num1) and isInteger(payload.num2)]">
+				<logger level="INFO" doc:name="Logger" doc:id="ee5231f0-2c09-4639-a24a-0998fc9bda1a" message="#[payload.num1 + payload.num2]"/>
+			</when>
+			<otherwise >
+				<raise-error doc:name="Raise error" doc:id="3aa9abb8-8379-4cd2-ba3d-c16b618fa29f" type="NUMBER:INVALID-FORMAT" description="Number are not in Integer Format"/>
+			</otherwise>
+		</choice>
+		<error-handler >
+			<on-error-propagate enableNotifications="true" logException="true" doc:name="On Error Propagate" doc:id="e8d466a0-d40f-4480-ab4e-9b8a156560b5" >
+				<ee:transform doc:name="Transform Message" doc:id="7637172f-d4a1-4d5c-b4dd-4152be0bf4fc" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json 
+--- 
+{
+	"errorType": error.errorType,
+	"errorMessage": error.description
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<logger level="INFO" doc:name="Logger" doc:id="1e8e0dfe-390f-4870-b1bb-d86cd9ad6731" message='#[payload]'/>
+			</on-error-propagate>
+		</error-handler>
+	</flow>
+	<flow name="add-flow" doc:id="054194ee-5eb8-4a8f-8b1c-5a0ee4ff7014" >
+		<http:listener doc:name="Listener" doc:id="0e7d69d8-2d86-4b10-8ad7-5ab8c8fcb0c3" config-ref="HTTP_Listener_config" allowedMethods="POST" path="/addNumbers">
+			<http:error-response >
+				<http:body ><![CDATA[#[payload]]]></http:body>
+			</http:error-response>
+		</http:listener>
+		<try doc:name="Try" doc:id="efbe3c87-3904-4297-8d8a-ebb8727de7d6" >
+			<validation:is-number numberType="INTEGER" doc:name="Is number" doc:id="bedc03c1-eee0-4ff0-aa5f-40bd1e270440" value="#[payload.num1]"/>
+			<set-variable value="#[payload.num1]" doc:name="Set Variable" doc:id="105f10b8-14e9-47f7-850a-184231c19d3f" variableName="num1"/>
+			<error-handler >
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="a8122dbe-b230-4678-91a9-f72078829623" >
+					<set-variable value="1" doc:name="Set Variable" doc:id="507595f1-4308-471d-a720-fb835a8c5912" variableName="num1"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+		<try doc:name="Try" doc:id="992c0a29-58d9-4734-84fb-1f846b7e671e" >
+			<validation:is-number numberType="INTEGER" doc:name="Is number" doc:id="bbef921d-1fbd-4f70-9886-90992fe67604" value="#[payload.num2]"/>
+			<set-variable value="#[payload.num2]" doc:name="Set Variable" doc:id="d361ea16-aec7-4418-8a4b-731e84d8b617" variableName="num2"/>
+			<error-handler >
+				<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="926a212d-9191-470a-b370-e40051000eda" >
+					<set-variable value="1" doc:name="Set Variable" doc:id="c6afcfb5-990d-4018-8762-e90e65cfce47" variableName="num2"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+		<ee:transform doc:name="Transform Message" doc:id="a65a7c89-dcab-49fe-b5b1-69263bd08aa1" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"Sum" : vars.num1 + vars.num2
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+</mule>
